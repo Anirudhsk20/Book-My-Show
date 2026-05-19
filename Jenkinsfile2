@@ -1,54 +1,26 @@
-(with K8S Stage)
-
 pipeline {
     agent any
-
     tools {
         jdk 'jdk17'
         nodejs 'node23'
     }
-
-    environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_IMAGE = 'kastrov/bms:latest'
-        EKS_CLUSTER_NAME = 'kastro-eks'
+        environment {
+        DOCKER_IMAGE = 'anirudhannie/bms:latest'
+        EKS_CLUSTER_NAME = 'anni-eks'
         AWS_REGION = 'us-east-1'
     }
-
     stages {
         stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
-
         stage('Checkout from Git') {
             steps {
-                git branch: 'main', url: 'https://github.com/KastroVKiran/Book-My-Show.git'
+                git branch: 'main', url: 'https://github.com/Anirudhsk20/Book-My-Show.git'
                 sh 'ls -la'  // Verify files after checkout
             }
         }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh ''' 
-                    $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=BMS \
-                        -Dsonar.projectKey=BMS
-                    '''
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
-                }
-            }
-        }
-
         stage('Install Dependencies') {
             steps {
                 sh '''
@@ -64,36 +36,41 @@ pipeline {
                 '''
             }
         }
-
-        stage('OWASP FS Scan') {
-            steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
-
-        stage('Trivy FS Scan') {
-            steps {
-                sh 'trivy fs . > trivyfs.txt'
-            }
-        }
-
         stage('Docker Build & Push') {
             steps {
                 script {
                     withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
                         sh ''' 
                         echo "Building Docker image..."
-                        docker build --no-cache -t $DOCKER_IMAGE -f bookmyshow-app/Dockerfile bookmyshow-app
+                        docker build --no-cache -t anirudhannie/bms:latest -f bookmyshow-app/Dockerfile bookmyshow-app
 
-                        echo "Pushing Docker image to Docker Hub..."
-                        docker push $DOCKER_IMAGE
+                        echo "Pushing Docker image to registry..."
+                        docker push anirudhannie/bms:latest
                         '''
                     }
                 }
             }
         }
+        stage('Deploy to Container') {
+            steps {
+                sh ''' 
+                echo "Stopping and removing old container..."
+                docker stop bms || true
+                docker rm bms || true
 
+                echo "Running new container on port 3000..."
+                docker run -d --restart=always --name bms -p 3000:3000 anirudhannie/bms:latest
+
+                echo "Checking running containers..."
+                docker ps -a
+
+                echo "Fetching logs..."
+                sleep 5  # Give time for the app to start
+                docker logs bms
+                '''
+            }
+        }
+    }
         stage('Deploy to EKS Cluster') {
             steps {
                 script {
@@ -127,7 +104,7 @@ pipeline {
                 body: "Project: ${env.JOB_NAME}<br/>" +
                       "Build Number: ${env.BUILD_NUMBER}<br/>" +
                       "URL: ${env.BUILD_URL}<br/>",
-                to: 'kastrokiran@gmail.com',
+                to: 'anirudhsk2018@gmail.com',
                 attachmentsPattern: 'trivyfs.txt'
         }
     }
